@@ -10,18 +10,13 @@
 #include <unistd.h>
 #include <string.h>
 #include <stdlib.h>
-#include <dirent.h>
-#include <fat.h>
-#ifdef HW_RVL
-#include <wiiuse/wpad.h>
-#endif
 
 //from my tests 50us seems to be the lowest
 //safe si transfer delay in between calls
 #define SI_TRANS_DELAY 50
 
-extern u8 sidthekid_gba[];
-extern u32 sidthekid_gba_size;
+#define GBA_PAYLOAD_BASE 0x81450000
+#define GBA_PAYLOAD_SIZE 2788
 
 u8 *resbuf,*cmdbuf;
 
@@ -52,12 +47,6 @@ unsigned int docrc(u32 crc, u32 val)
 		val>>=1;
 	}
 	return crc;
-}
-
-static inline void wait_for_transfer()
-{
-	//350 is REALLY pushing it already, cant go further
-	do{ usleep(350); }while(transval == 0);
 }
 
 unsigned int calckey(unsigned int size)
@@ -125,13 +114,6 @@ void send(u32 msg)
 	SI_Transfer(1,cmdbuf,5,resbuf,1,transcb,SI_TRANS_DELAY);
 	while(transval == 0) ;
 }
-typedef struct _gbNames {
-	char name[256];
-} gbNames;
-
-int compare (const void * a, const void * b ) {
-  return strcmp((*(gbNames*)a).name, (*(gbNames*)b).name);
-}
 
 int main(int argc, char *argv[]) 
 {
@@ -152,88 +134,39 @@ int main(int argc, char *argv[])
 	CON_InitEx(rmode, x, y, w, h);
 	VIDEO_ClearFrameBuffer(rmode, xfb, COLOR_BLACK);
 	PAD_Init();
-#ifdef HW_RVL
-	WPAD_Init();
-#endif
 	cmdbuf = memalign(32,32);
 	resbuf = memalign(32,32);
-	u8 *gbaBuf = malloc(0x40000);
-	fatInitDefault();
-	int gbaCnt = 0;
-	DIR *dir = opendir("/gba");
-	struct dirent *dent;
-	gbNames *names;
-    if(dir!=NULL)
-    {
-        while((dent=readdir(dir))!=NULL)
-		{
-            if(strstr(dent->d_name,".gba") != NULL)
-				gbaCnt++;
-		}
-		closedir(dir);
-		names = malloc(sizeof(gbNames)*gbaCnt);
-		memset(names,0,sizeof(gbNames)*gbaCnt);
-		dir = opendir("/gba");
-		int i = 0;
-        while((dent=readdir(dir))!=NULL)
-		{
-            if(strstr(dent->d_name,".gba") != NULL)
-			{
-				strcpy(names[i].name,dent->d_name);
-				i++;
-			}
-		}
-		closedir(dir);
-    }
-	if(gbaCnt == 0)
-	{
-		printf("No Files! Make sure you have .gba files in your \"gba\" folder!\n");
-		VIDEO_WaitVSync();
-		VIDEO_WaitVSync();
-		sleep(5);
-		return 0;
-	}
-	qsort(names, gbaCnt, sizeof(gbNames), compare);
+	u8 *gbaBuf = (u8*)GBA_PAYLOAD_BASE;
+	size_t gbaSize = GBA_PAYLOAD_SIZE;
+
 	int i;
 	while(1)
 	{
-		i = 0;
+		//u32 *addr = (u32*)GBA_PAYLOAD_BASE;
+		//u32 val = *addr;
 		while(1)
 		{
 			printf("\x1b[2J");
 			printf("\x1b[37m");
 			printf("GBA Link Cable ROM Sender v1.0 by FIX94\n");
-			printf("Select GBA ROM file\n");
-			printf("<< %s >>\n",names[i].name);
+			printf("Press A to start transfer\n");
+			//printf("0x%08lx: %08lx", (u32)addr, val);
 			PAD_ScanPads();
 			VIDEO_WaitVSync();
 			u32 btns = PAD_ButtonsDown(0);
-			#ifdef HW_RVL
-			WPAD_ScanPads();
-			u32 wbtns = WPAD_ButtonsDown(0);
-			//merge wbtns into btns
-			if((wbtns & WPAD_BUTTON_A) || (wbtns & WPAD_CLASSIC_BUTTON_A))
-				btns |= PAD_BUTTON_A;
-			if((wbtns & WPAD_BUTTON_RIGHT) || (wbtns & WPAD_CLASSIC_BUTTON_RIGHT))
-				btns |= PAD_BUTTON_RIGHT;
-			if((wbtns & WPAD_BUTTON_LEFT) || (wbtns & WPAD_CLASSIC_BUTTON_LEFT))
-				btns |= PAD_BUTTON_LEFT;
-			if((wbtns & WPAD_BUTTON_HOME) || (wbtns & WPAD_CLASSIC_BUTTON_HOME))
-				btns |= PAD_BUTTON_START;
-			#endif
 			//handle selected option
 			if(btns & PAD_BUTTON_A)
 				break;
-			else if(btns & PAD_BUTTON_RIGHT)
-			{
-				i++;
-				if(i >= gbaCnt) i = 0;
-			}
-			else if(btns & PAD_BUTTON_LEFT)
-			{
-				i--;
-				if(i < 0) i = (gbaCnt-1);
-			}
+			//else if(btns & PAD_BUTTON_RIGHT)
+			//{
+			//	addr++;
+			//	val = *addr;
+			//}
+			//else if(btns & PAD_BUTTON_LEFT)
+			//{
+			//	addr--;
+			//	val = *addr;
+			//}
 			else if(btns & PAD_BUTTON_START)
 			{
 				printf("Exit...\n");
@@ -243,23 +176,6 @@ int main(int argc, char *argv[])
 				return 0;
 			}
 		}
-		char romF[256];
-		sprintf(romF,"/gba/%s",names[i].name);
-		FILE *f = fopen(romF,"rb");
-		if(f == NULL) continue;
-		fseek(f,0,SEEK_END);
-		size_t gbaSize = ftell(f);
-		rewind(f);
-		if(gbaSize > 0x40000)
-		{
-			printf("ROM larger than 256KB!\n");
-			VIDEO_WaitVSync();
-			sleep(2);
-			fclose(f);
-			continue;
-		}
-		fread(gbaBuf,gbaSize,1,f);
-		fclose(f);
 		printf("Waiting for GBA in port 2...\n");
 		resval = 0;
 
