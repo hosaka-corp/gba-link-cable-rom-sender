@@ -7,7 +7,11 @@ ifeq ($(strip $(DEVKITPPC)),)
 $(error "Please set DEVKITPPC in your environment. export DEVKITPPC=<path to>devkitPPC")
 endif
 
-include $(DEVKITPPC)/gamecube_rules
+
+# Going to use our own libogc - oh no
+include $(DEVKITPPC)/fgx_gamecube_rules
+
+#include $(DEVKITPPC)/gamecube_rules
 
 #---------------------------------------------------------------------------------
 # TARGET is the name of the output
@@ -15,7 +19,7 @@ include $(DEVKITPPC)/gamecube_rules
 # SOURCES is a list of directories containing source code
 # INCLUDES is a list of directories containing extra header files
 #---------------------------------------------------------------------------------
-TARGET		:=	gbaromsend_gc
+TARGET		:=	sender
 BUILD		:=	build
 SOURCES		:=	source
 DATA		:=	data
@@ -25,15 +29,15 @@ INCLUDES	:=	source
 # options for code generation
 #---------------------------------------------------------------------------------
 
-CFLAGS	= -g -O2 -Wall $(MACHDEP) $(INCLUDE)
+CFLAGS	= -O0 -Wall $(MACHDEP) $(INCLUDE)
 CXXFLAGS	=	$(CFLAGS)
 
-LDFLAGS	= -g $(MACHDEP) -Wl,-Map,$(notdir $@).map -Wl,--section-start=.init=0x81000100
+LDFLAGS	= -T $(PWD)/rom-sender.ld -g $(MACHDEP) -Wl,-Map,$(notdir $@).map -Wl,--section-start=.init=0x81000100
 
 #---------------------------------------------------------------------------------
 # any extra libraries we wish to link with the project
 #---------------------------------------------------------------------------------
-LIBS	:= -lfat -logc
+LIBS	:= -logc
 
 
 #---------------------------------------------------------------------------------

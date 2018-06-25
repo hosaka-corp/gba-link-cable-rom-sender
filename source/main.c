@@ -10,15 +10,35 @@
 #include <unistd.h>
 #include <string.h>
 #include <stdlib.h>
+#include <ogc/machine/asm.h>
+#include <ogc/machine/processor.h>
 
 //from my tests 50us seems to be the lowest
 //safe si transfer delay in between calls
 #define SI_TRANS_DELAY 50
 
+/* After you've compiled some multiboot image, you'll have to write 
+ * gba_payload.h into this directory so we can tell the DOL about the expected
+ * size of the transfer.  */
+
+#include "gba_payload.h"
 #define GBA_PAYLOAD_BASE 0x81450000
-#define GBA_PAYLOAD_SIZE 2788
 
 u8 *resbuf,*cmdbuf;
+
+// Jump back to the FGX entrypoint
+#define GOTO_ENTRYPOINT()       __asm__ volatile( "mtlr %0; blr;" : : "r"(0x80003154));
+
+/* I'm *pretty sure* the trick is resetting the MSR here. The changes
+ * to libogc might also make a difference -- need to test to see what
+ * is actually necessary and sufficient 
+ */
+void do_reset(void)
+{
+	mtmsr(MSR_FP|MSR_IR|MSR_DR|MSR_RI);
+	__asm__ volatile( "sync; isync;" :::);
+	GOTO_ENTRYPOINT()
+}
 
 volatile u32 transval = 0;
 void transcb(s32 chan, u32 ret)
@@ -115,6 +135,29 @@ void send(u32 msg)
 	while(transval == 0) ;
 }
 
+/* Taking these gadgets from FIXs' loader code in their other exploits */
+void *_memcpy(void *ptr, const void *src, int size) {
+	char* ptr2 = ptr;
+	const char* src2 = src;
+	while(size--) *ptr2++ = *src2++;
+	return ptr;
+}
+static void sync_cache(void *p, u32 n)
+{
+	u32 start, end;
+
+	start = (u32)p & ~31;
+	end = ((u32)p + n + 31) & ~31;
+	n = (end - start) >> 5;
+
+	while (n--) {
+		asm("dcbst 0,%0 ; icbi 0,%0" : : "b"(p));
+		p += 32;
+	}
+	asm("sync ; isync");
+}
+
+
 int main(int argc, char *argv[]) 
 {
 	void *xfb = NULL;
@@ -142,41 +185,30 @@ int main(int argc, char *argv[])
 	int i;
 	while(1)
 	{
-		//u32 *addr = (u32*)GBA_PAYLOAD_BASE;
-		//u32 val = *addr;
 		while(1)
 		{
 			printf("\x1b[2J");
 			printf("\x1b[37m");
-			printf("GBA Link Cable ROM Sender v1.0 by FIX94\n");
-			printf("Press A to start transfer\n");
-			//printf("0x%08lx: %08lx", (u32)addr, val);
+			printf("<TASbot> Wait, did it work?\n");
+			printf("<TASbot> dwangoAC, did you plug a GBA in yet?\n"); 
+			printf("<TASbot> Just press A when you're ready to send me over!\n");
 			PAD_ScanPads();
 			VIDEO_WaitVSync();
 			u32 btns = PAD_ButtonsDown(0);
 			//handle selected option
 			if(btns & PAD_BUTTON_A)
 				break;
-			//else if(btns & PAD_BUTTON_RIGHT)
-			//{
-			//	addr++;
-			//	val = *addr;
-			//}
-			//else if(btns & PAD_BUTTON_LEFT)
-			//{
-			//	addr--;
-			//	val = *addr;
-			//}
 			else if(btns & PAD_BUTTON_START)
 			{
-				printf("Exit...\n");
+				printf("<TASbot> Here, let me restart the game for you ...\n");
 				VIDEO_WaitVSync();
 				VIDEO_WaitVSync();
-				sleep(5);
+				sleep(3);
+				do_reset();
 				return 0;
 			}
 		}
-		printf("Waiting for GBA in port 2...\n");
+		printf("<TASbot> Alright, I'm waiting ..\n");
 		resval = 0;
 
 		SI_GetTypeAsync(1,acb);
@@ -195,14 +227,14 @@ int main(int argc, char *argv[])
 		}
 		if(resval & SI_GBA)
 		{
-			printf("GBA Found! Waiting for BIOS\n");
+			printf("<TASbot> Hey cool, a GBA!\n");
 			resbuf[2]=0;
 			while(!(resbuf[2]&0x10))
 			{
 				doreset();
 				getstatus();
 			}
-			printf("GBA Ready, sending ROM File\n");
+			printf("<TASbot> Alright, this'll only take a second ...\n");
 			unsigned int sendsize = (((gbaSize)+7)&~7);
 			unsigned int ourkey = calckey(sendsize);
 			//printf("Our Key: %08x\n", ourkey);
@@ -236,10 +268,14 @@ int main(int argc, char *argv[])
 			send(fcrc);
 			//get crc back (unused)
 			recv();
-			printf("All done!\n");
+			printf("<TASbot> Alright, I think it worked!\n");
 			VIDEO_WaitVSync();
 			VIDEO_WaitVSync();
-			sleep(3);
+			printf("<TASbot> Here, let me reset the game for you!\n");
+			sleep(1);
+			printf("<TASbot> Alright, give me a few seconds! ..\n");
+			sleep(5);
+			do_reset();
 		}
 	}
 	return 0;
